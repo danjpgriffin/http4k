@@ -2,12 +2,16 @@ package org.http4k.webdriver
 
 import com.natpryce.hamkrest.assertion.assertThat
 import com.natpryce.hamkrest.equalTo
+import com.natpryce.hamkrest.hasElement
 import com.natpryce.hamkrest.present
 import org.http4k.core.Method
 import org.http4k.core.Response
+import org.http4k.core.Status.Companion.FOUND
 import org.http4k.core.Status.Companion.OK
 import org.http4k.core.cookie.cookie
 import org.http4k.core.cookie.cookies
+import org.http4k.routing.bind
+import org.http4k.routing.routes
 import org.junit.Test
 import org.openqa.selenium.By
 import org.openqa.selenium.Cookie
@@ -180,6 +184,38 @@ class Http4kWebDriverTest {
     }
 
     @Test
+    fun `follows redirect and stores uri of last page requested`() {
+        val driver = Http4kWebDriver(routes(
+            "/start" bind Method.GET to { _ -> Response(FOUND).header("location", "/finish") },
+            "/finish" bind Method.GET to { _ ->
+                val body = File("src/test/resources/test.html").readText()
+                Response(OK).body(body.replace("THEURL", "finish-page"))
+            }
+        ))
+
+        driver.get("/start")
+
+        driver.assertOnPage("finish-page")
+        driver.assertCurrentUrl("/finish")
+    }
+
+    @Test
+    fun `stores cookies set during redirection`() {
+        val driver = Http4kWebDriver(routes(
+            "/start" bind Method.GET to { _ -> Response(FOUND).header("location", "/finish").cookie(HCookie("foo", "bar")) },
+            "/finish" bind Method.GET to { request ->
+                val body = File("src/test/resources/test.html").readText()
+                Response(OK).body(body.replace("THEURL", request.cookie("foo")?.value.orEmpty()))
+            }
+        ))
+
+        driver.get("/start")
+        driver.assertOnPage("bar")
+
+        assertThat(driver.manage().cookies, hasElement(Cookie("foo", "bar")))
+    }
+
+    @Test
     fun `unsupported features`() {
         driver.get("/bill")
 
@@ -200,4 +236,10 @@ class Http4kWebDriverTest {
         assertThat(this.findElement(By.tagName("h1"))!!.text, equalTo(expected))
     }
 
+    private fun Http4kWebDriver.assertCurrentUrl(url: String) {
+        assertThat(this.currentUrl, equalTo(url))
+    }
+
+
 }
+
